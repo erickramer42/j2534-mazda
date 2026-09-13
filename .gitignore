@@ -8,3 +8,5 @@ build/
 .vscode/
 *.local
 *.code-workspace
+test/build/
+test/.local/
