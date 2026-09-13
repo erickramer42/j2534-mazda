@@ -4,6 +4,7 @@ add_library(proxy_dll SHARED
     logger.h
     j2534_types.h
     exports.def
+    resource.rc
 )
 
 target_include_directories(proxy_dll PUBLIC ".")

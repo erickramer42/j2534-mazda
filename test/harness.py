@@ -74,7 +74,7 @@ def subproc_probe(script):
 
 def main():
     if struct.calcsize("P") * 8 != 32:
-        sys.exit("ERROR: 32-bit Python required (run `py -32 harness.py`)")
+        sys.exit("ERROR: 32-bit Python required (this is %d-bit)" % (struct.calcsize("P") * 8))
     if not os.path.exists(PROXY_DLL):
         sys.exit("ERROR: proxy not found at %s" % PROXY_DLL)
 
