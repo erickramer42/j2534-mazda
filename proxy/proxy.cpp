@@ -1,0 +1,256 @@
+#include <windows.h>
+#include <cstdio>
+#include <string>
+#include <unordered_map>
+
+#include "logger.h"
+
+#define STATUS_NOERROR 0x0000
+#define FIVE_BAUD_INIT 0x05
+
+static HMODULE g_real = NULL;
+static HMODULE g_selfModule = NULL;
+static std::wstring g_selfDir; // directory of this proxy DLL
+static bool g_enabled = true;
+
+// returns the directory containing this DLL, no trailing slash
+static const std::wstring& GetSelfDir()
+{
+    if (g_selfDir.empty()) {
+        wchar_t selfPath[MAX_PATH];
+        if (GetModuleFileNameW(g_selfModule, selfPath, MAX_PATH)) {
+            std::wstring tmp(selfPath);
+            size_t slash = tmp.find_last_of(L'\\');
+            if (slash != std::wstring::npos)
+                g_selfDir = tmp.substr(0, slash);
+        }
+    }
+    return g_selfDir;
+}
+
+static HMODULE LoadRealDriver()
+{
+    std::wstring real = GetSelfDir() + L"\\OBDXVX_J2534_real.dll";
+    return LoadLibraryW(real.c_str());
+}
+
+BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID)
+{
+    if (reason == DLL_PROCESS_ATTACH) {
+        g_selfModule = (HMODULE)hinst;
+
+        // [trace] enabled=0 disables frame logging
+        std::wstring ini = GetSelfDir() + L"\\trace.ini";
+        g_enabled = GetPrivateProfileIntW(L"trace", L"enabled", 1, ini.c_str()) != 0;
+    }
+    return TRUE;
+}
+
+static FARPROC Resolve(const char* name)
+{
+    static std::unordered_map<std::string, FARPROC> cache;
+    auto it = cache.find(name);
+    if (it != cache.end()) return it->second;
+
+    if (!g_real) {
+        g_real = LoadRealDriver();
+        if (!g_real) {
+            LogCall("LoadLibrary failed for OBDXVX_J2534_real.dll, GLE=%lu", GetLastError());
+            return NULL;
+        }
+    }
+    FARPROC fn = GetProcAddress(g_real, name);
+    cache[name] = fn;
+    if (!fn) LogCall("GetProcAddress failed for '%s'", name);
+    return fn;
+}
+
+extern "C" {
+
+__declspec(dllexport) long __stdcall
+PassThruOpen(const char* pName, unsigned long* pDeviceID)
+{
+    typedef long(__stdcall *Fn)(const char*, unsigned long*);
+    Fn f = (Fn)Resolve("PassThruOpen");
+    long r = f(pName, pDeviceID);
+    LogCall("PassThruOpen(name='%s') -> %ld deviceId=%lu",
+            pName ? pName : "", r, pDeviceID ? *pDeviceID : 0);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruClose(unsigned long DeviceID)
+{
+    typedef long(__stdcall *Fn)(unsigned long);
+    Fn f = (Fn)Resolve("PassThruClose");
+    long r = f(DeviceID);
+    LogCall("PassThruClose(device=%lu) -> %ld", DeviceID, r);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruConnect(unsigned long DeviceID, unsigned long ProtocolID, unsigned long Flags,
+                unsigned long BaudRate, unsigned long* pChannelID)
+{
+    typedef long(__stdcall *Fn)(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long*);
+    Fn f = (Fn)Resolve("PassThruConnect");
+    long r = f(DeviceID, ProtocolID, Flags, BaudRate, pChannelID);
+    LogCall("PassThruConnect(device=%lu proto=0x%lX flags=0x%lX baud=%lu) -> %ld channel=%lu",
+            DeviceID, ProtocolID, Flags, BaudRate, r, pChannelID ? *pChannelID : 0);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruDisconnect(unsigned long ChannelID)
+{
+    typedef long(__stdcall *Fn)(unsigned long);
+    Fn f = (Fn)Resolve("PassThruDisconnect");
+    long r = f(ChannelID);
+    LogCall("PassThruDisconnect(channel=%lu) -> %ld", ChannelID, r);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruReadMsgs(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pNumMsgs,
+                 unsigned long Timeout)
+{
+    typedef long(__stdcall *Fn)(unsigned long, PASSTHRU_MSG*, unsigned long*, unsigned long);
+    Fn f = (Fn)Resolve("PassThruReadMsgs");
+    long r = f(ChannelID, pMsg, pNumMsgs, Timeout);
+    if (g_enabled) LogCall("PassThruReadMsgs(ch=%lu timeout=%lu) -> %ld num=%lu",
+                           ChannelID, Timeout, r, pNumMsgs ? *pNumMsgs : 0);
+    if (g_enabled && pNumMsgs && *pNumMsgs > 0 && r >= 0)
+        LogMsgs("RX", ChannelID, pMsg, *pNumMsgs);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pNumMsgs,
+                 unsigned long Timeout)
+{
+    typedef long(__stdcall *Fn)(unsigned long, PASSTHRU_MSG*, unsigned long*, unsigned long);
+    Fn f = (Fn)Resolve("PassThruWriteMsgs");
+    if (pNumMsgs && *pNumMsgs > 0)
+        LogMsgs("TX", ChannelID, pMsg, *pNumMsgs);
+    long r = f(ChannelID, pMsg, pNumMsgs, Timeout);
+    LogCall("PassThruWriteMsgs(ch=%lu timeout=%lu) -> %ld", ChannelID, Timeout, r);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruStartPeriodicMsg(unsigned long ChannelID, PASSTHRU_MSG* pMsg,
+                         unsigned long* pMsgID, unsigned long TimeInterval)
+{
+    typedef long(__stdcall *Fn)(unsigned long, PASSTHRU_MSG*, unsigned long*, unsigned long);
+    Fn f = (Fn)Resolve("PassThruStartPeriodicMsg");
+    long r = f(ChannelID, pMsg, pMsgID, TimeInterval);
+    LogCall("PassThruStartPeriodicMsg(ch=%lu interval=%lu) -> %ld msgID=%lu",
+            ChannelID, TimeInterval, r, pMsgID ? *pMsgID : 0);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruStopPeriodicMsg(unsigned long ChannelID, unsigned long MsgID)
+{
+    typedef long(__stdcall *Fn)(unsigned long, unsigned long);
+    Fn f = (Fn)Resolve("PassThruStopPeriodicMsg");
+    long r = f(ChannelID, MsgID);
+    LogCall("PassThruStopPeriodicMsg(ch=%lu msgID=%lu) -> %ld", ChannelID, MsgID, r);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruStartMsgFilter(unsigned long ChannelID, unsigned long FilterType,
+                       PASSTHRU_MSG* pMaskMsg, PASSTHRU_MSG* pPatternMsg,
+                       PASSTHRU_MSG* pFlowControlMsg, unsigned long* pFilterID)
+{
+    typedef long(__stdcall *Fn)(unsigned long, unsigned long, PASSTHRU_MSG*, PASSTHRU_MSG*, PASSTHRU_MSG*, unsigned long*);
+    Fn f = (Fn)Resolve("PassThruStartMsgFilter");
+    long r = f(ChannelID, FilterType, pMaskMsg, pPatternMsg, pFlowControlMsg, pFilterID);
+    LogCall("StartMsgFilter(ch=%lu type=0x%lX mask=[%s] pattern=[%s] fc=[%s]) -> %ld filterID=%lu",
+            ChannelID, FilterType,
+            pMaskMsg ? HexBytes(*pMaskMsg) : "",
+            pPatternMsg ? HexBytes(*pPatternMsg) : "",
+            pFlowControlMsg ? HexBytes(*pFlowControlMsg) : "",
+            r, pFilterID ? *pFilterID : 0);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruStopMsgFilter(unsigned long ChannelID, unsigned long FilterID)
+{
+    typedef long(__stdcall *Fn)(unsigned long, unsigned long);
+    Fn f = (Fn)Resolve("PassThruStopMsgFilter");
+    long r = f(ChannelID, FilterID);
+    LogCall("PassThruStopMsgFilter(ch=%lu filterID=%lu) -> %ld", ChannelID, FilterID, r);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruSetProgrammingVoltage(unsigned long DeviceID, unsigned long Pin, unsigned long Voltage)
+{
+    typedef long(__stdcall *Fn)(unsigned long, unsigned long, unsigned long);
+    Fn f = (Fn)Resolve("PassThruSetProgrammingVoltage");
+    long r = f(DeviceID, Pin, Voltage);
+    LogCall("SetProgrammingVoltage(device=%lu pin=%lu voltage=%lu) -> %ld", DeviceID, Pin, Voltage, r);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruReadVoltage(unsigned long DeviceID, unsigned long* pVoltage)
+{
+    typedef long(__stdcall *Fn)(unsigned long, unsigned long*);
+    Fn f = (Fn)Resolve("PassThruReadVoltage");
+    long r = f(DeviceID, pVoltage);
+    LogCall("ReadVoltage(device=%lu) -> %ld voltage=%lu mV", DeviceID, r, pVoltage ? *pVoltage : 0);
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruReadVersion(unsigned long DeviceID, char* pFirmwareVersion,
+                    char* pDllVersion, char* pApiVersion)
+{
+    typedef long(__stdcall *Fn)(unsigned long, char*, char*, char*);
+    Fn f = (Fn)Resolve("PassThruReadVersion");
+    long r = f(DeviceID, pFirmwareVersion, pDllVersion, pApiVersion);
+    LogCall("ReadVersion(device=%lu) -> %ld fw='%s' dll='%s' api='%s'",
+            DeviceID, r,
+            pFirmwareVersion ? pFirmwareVersion : "",
+            pDllVersion ? pDllVersion : "",
+            pApiVersion ? pApiVersion : "");
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruGetLastError(char* pErrorDescription)
+{
+    typedef long(__stdcall *Fn)(char*);
+    Fn f = (Fn)Resolve("PassThruGetLastError");
+    long r = f(pErrorDescription);
+    LogCall("GetLastError() -> %ld desc='%s'",
+            r, pErrorDescription ? pErrorDescription : "");
+    return r;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruIoctl(unsigned long HandleID, unsigned long IoctlID,
+              void* pInput, void* pOutput)
+{
+    typedef long(__stdcall *Fn)(unsigned long, unsigned long, void*, void*);
+    Fn f = (Fn)Resolve("PassThruIoctl");
+    long r = f(HandleID, IoctlID, pInput, pOutput);
+    LogCall("Ioctl(handle=%lu id=0x%lX) -> %ld", HandleID, IoctlID, r);
+    // TODO verify that 0x01 (GET_CONFIG) and 0x02 (SET_CONFIG) are actually get and set  
+    // Decode SET_CONFIG (0x02) / GET_CONFIG (0x01) payloads
+    if ((IoctlID == 0x01 || IoctlID == 0x02) && pInput) {
+        SCONFIG_LIST* list = (SCONFIG_LIST*)pInput;
+        for (unsigned long i = 0; list && i < list->NumOfParams; ++i) {
+            LogCall("  %s param=0x%lX value=0x%lX",
+                    IoctlID == 0x02 ? "SET_CONFIG" : "GET_CONFIG",
+                    list->ConfigPtr[i].Parameter,
+                    list->ConfigPtr[i].Value);
+        }
+    return r;
+}
+
+} // extern "C"

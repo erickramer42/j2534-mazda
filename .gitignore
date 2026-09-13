@@ -1,0 +1,10 @@
+traces/
+*.log
+build/
+*.obj
+*.dll
+*.lib
+*.exp
+.vscode/
+*.local
+*.code-workspace

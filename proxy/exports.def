@@ -1,0 +1,17 @@
+LIBRARY OBDXTrace
+EXPORTS
+    PassThruOpen
+    PassThruClose
+    PassThruConnect
+    PassThruDisconnect
+    PassThruReadMsgs
+    PassThruWriteMsgs
+    PassThruStartPeriodicMsg
+    PassThruStopPeriodicMsg
+    PassThruStartMsgFilter
+    PassThruStopMsgFilter
+    PassThruSetProgrammingVoltage
+    PassThruReadVoltage
+    PassThruReadVersion
+    PassThruGetLastError
+    PassThruIoctl
