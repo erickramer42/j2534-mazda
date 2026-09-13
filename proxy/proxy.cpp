@@ -42,6 +42,11 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID)
         // [trace] enabled=0 disables frame logging
         std::wstring ini = GetSelfDir() + L"\\trace.ini";
         g_enabled = GetPrivateProfileIntW(L"trace", L"enabled", 1, ini.c_str()) != 0;
+        if(g_enabled) {
+            LoggerInit(ini);
+            LogCall("Proxy loaded, logging %s, dll=%ls", 
+                    g_enabled ? "ENABLED" : "disabled", GetSelfDir().c_str());
+        }
     }
     return TRUE;
 }
@@ -72,6 +77,7 @@ PassThruOpen(const char* pName, unsigned long* pDeviceID)
 {
     typedef long(__stdcall *Fn)(const char*, unsigned long*);
     Fn f = (Fn)Resolve("PassThruOpen");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(pName, pDeviceID);
     LogCall("PassThruOpen(name='%s') -> %ld deviceId=%lu",
             pName ? pName : "", r, pDeviceID ? *pDeviceID : 0);
@@ -83,6 +89,7 @@ PassThruClose(unsigned long DeviceID)
 {
     typedef long(__stdcall *Fn)(unsigned long);
     Fn f = (Fn)Resolve("PassThruClose");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(DeviceID);
     LogCall("PassThruClose(device=%lu) -> %ld", DeviceID, r);
     return r;
@@ -94,6 +101,7 @@ PassThruConnect(unsigned long DeviceID, unsigned long ProtocolID, unsigned long 
 {
     typedef long(__stdcall *Fn)(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long*);
     Fn f = (Fn)Resolve("PassThruConnect");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(DeviceID, ProtocolID, Flags, BaudRate, pChannelID);
     LogCall("PassThruConnect(device=%lu proto=0x%lX flags=0x%lX baud=%lu) -> %ld channel=%lu",
             DeviceID, ProtocolID, Flags, BaudRate, r, pChannelID ? *pChannelID : 0);
@@ -105,6 +113,7 @@ PassThruDisconnect(unsigned long ChannelID)
 {
     typedef long(__stdcall *Fn)(unsigned long);
     Fn f = (Fn)Resolve("PassThruDisconnect");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(ChannelID);
     LogCall("PassThruDisconnect(channel=%lu) -> %ld", ChannelID, r);
     return r;
@@ -116,10 +125,11 @@ PassThruReadMsgs(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pNu
 {
     typedef long(__stdcall *Fn)(unsigned long, PASSTHRU_MSG*, unsigned long*, unsigned long);
     Fn f = (Fn)Resolve("PassThruReadMsgs");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(ChannelID, pMsg, pNumMsgs, Timeout);
     if (g_enabled) LogCall("PassThruReadMsgs(ch=%lu timeout=%lu) -> %ld num=%lu",
                            ChannelID, Timeout, r, pNumMsgs ? *pNumMsgs : 0);
-    if (g_enabled && pNumMsgs && *pNumMsgs > 0 && r >= 0)
+    if (g_enabled && pNumMsgs && *pNumMsgs > 0 && r == STATUS_NOERROR)
         LogMsgs("RX", ChannelID, pMsg, *pNumMsgs);
     return r;
 }
@@ -130,6 +140,7 @@ PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pN
 {
     typedef long(__stdcall *Fn)(unsigned long, PASSTHRU_MSG*, unsigned long*, unsigned long);
     Fn f = (Fn)Resolve("PassThruWriteMsgs");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     if (pNumMsgs && *pNumMsgs > 0)
         LogMsgs("TX", ChannelID, pMsg, *pNumMsgs);
     long r = f(ChannelID, pMsg, pNumMsgs, Timeout);
@@ -143,6 +154,7 @@ PassThruStartPeriodicMsg(unsigned long ChannelID, PASSTHRU_MSG* pMsg,
 {
     typedef long(__stdcall *Fn)(unsigned long, PASSTHRU_MSG*, unsigned long*, unsigned long);
     Fn f = (Fn)Resolve("PassThruStartPeriodicMsg");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(ChannelID, pMsg, pMsgID, TimeInterval);
     LogCall("PassThruStartPeriodicMsg(ch=%lu interval=%lu) -> %ld msgID=%lu",
             ChannelID, TimeInterval, r, pMsgID ? *pMsgID : 0);
@@ -154,6 +166,7 @@ PassThruStopPeriodicMsg(unsigned long ChannelID, unsigned long MsgID)
 {
     typedef long(__stdcall *Fn)(unsigned long, unsigned long);
     Fn f = (Fn)Resolve("PassThruStopPeriodicMsg");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(ChannelID, MsgID);
     LogCall("PassThruStopPeriodicMsg(ch=%lu msgID=%lu) -> %ld", ChannelID, MsgID, r);
     return r;
@@ -166,6 +179,7 @@ PassThruStartMsgFilter(unsigned long ChannelID, unsigned long FilterType,
 {
     typedef long(__stdcall *Fn)(unsigned long, unsigned long, PASSTHRU_MSG*, PASSTHRU_MSG*, PASSTHRU_MSG*, unsigned long*);
     Fn f = (Fn)Resolve("PassThruStartMsgFilter");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(ChannelID, FilterType, pMaskMsg, pPatternMsg, pFlowControlMsg, pFilterID);
     LogCall("StartMsgFilter(ch=%lu type=0x%lX mask=[%s] pattern=[%s] fc=[%s]) -> %ld filterID=%lu",
             ChannelID, FilterType,
@@ -181,6 +195,7 @@ PassThruStopMsgFilter(unsigned long ChannelID, unsigned long FilterID)
 {
     typedef long(__stdcall *Fn)(unsigned long, unsigned long);
     Fn f = (Fn)Resolve("PassThruStopMsgFilter");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(ChannelID, FilterID);
     LogCall("PassThruStopMsgFilter(ch=%lu filterID=%lu) -> %ld", ChannelID, FilterID, r);
     return r;
@@ -191,16 +206,19 @@ PassThruSetProgrammingVoltage(unsigned long DeviceID, unsigned long Pin, unsigne
 {
     typedef long(__stdcall *Fn)(unsigned long, unsigned long, unsigned long);
     Fn f = (Fn)Resolve("PassThruSetProgrammingVoltage");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(DeviceID, Pin, Voltage);
     LogCall("SetProgrammingVoltage(device=%lu pin=%lu voltage=%lu) -> %ld", DeviceID, Pin, Voltage, r);
     return r;
 }
 
+// j2534-2 technically so not required, but included for completeness; some devices implement it
 __declspec(dllexport) long __stdcall
 PassThruReadVoltage(unsigned long DeviceID, unsigned long* pVoltage)
 {
     typedef long(__stdcall *Fn)(unsigned long, unsigned long*);
     Fn f = (Fn)Resolve("PassThruReadVoltage");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(DeviceID, pVoltage);
     LogCall("ReadVoltage(device=%lu) -> %ld voltage=%lu mV", DeviceID, r, pVoltage ? *pVoltage : 0);
     return r;
@@ -212,6 +230,7 @@ PassThruReadVersion(unsigned long DeviceID, char* pFirmwareVersion,
 {
     typedef long(__stdcall *Fn)(unsigned long, char*, char*, char*);
     Fn f = (Fn)Resolve("PassThruReadVersion");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(DeviceID, pFirmwareVersion, pDllVersion, pApiVersion);
     LogCall("ReadVersion(device=%lu) -> %ld fw='%s' dll='%s' api='%s'",
             DeviceID, r,
@@ -226,6 +245,7 @@ PassThruGetLastError(char* pErrorDescription)
 {
     typedef long(__stdcall *Fn)(char*);
     Fn f = (Fn)Resolve("PassThruGetLastError");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(pErrorDescription);
     LogCall("GetLastError() -> %ld desc='%s'",
             r, pErrorDescription ? pErrorDescription : "");
@@ -238,18 +258,22 @@ PassThruIoctl(unsigned long HandleID, unsigned long IoctlID,
 {
     typedef long(__stdcall *Fn)(unsigned long, unsigned long, void*, void*);
     Fn f = (Fn)Resolve("PassThruIoctl");
+    if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(HandleID, IoctlID, pInput, pOutput);
-    LogCall("Ioctl(handle=%lu id=0x%lX) -> %ld", HandleID, IoctlID, r);
-    // TODO verify that 0x01 (GET_CONFIG) and 0x02 (SET_CONFIG) are actually get and set  
-    // Decode SET_CONFIG (0x02) / GET_CONFIG (0x01) payloads
-    if ((IoctlID == 0x01 || IoctlID == 0x02) && pInput) {
+
+    if (IoctlID == 0x02 && pInput) {            // SET_CONFIG: params inbound
         SCONFIG_LIST* list = (SCONFIG_LIST*)pInput;
-        for (unsigned long i = 0; list && i < list->NumOfParams; ++i) {
-            LogCall("  %s param=0x%lX value=0x%lX",
-                    IoctlID == 0x02 ? "SET_CONFIG" : "GET_CONFIG",
-                    list->ConfigPtr[i].Parameter,
-                    list->ConfigPtr[i].Value);
-        }
+        for (unsigned long i = 0; i < list->NumOfParams; ++i)
+            LogCall("  SET_CONFIG param=0x%lX value=0x%lX",
+                    list->ConfigPtr[i].Parameter, list->ConfigPtr[i].Value);
+    }
+    if (IoctlID == 0x01 && pOutput) {            // GET_CONFIG: results land in pOutput
+        SCONFIG_LIST* list = (SCONFIG_LIST*)pOutput;
+        for (unsigned long i = 0; i < list->NumOfParams; ++i)
+            LogCall("  GET_CONFIG param=0x%lX value=0x%lX",
+                    list->ConfigPtr[i].Parameter, list->ConfigPtr[i].Value);
+    }
+    LogCall("Ioctl(handle=%lu id=0x%lX) -> %ld", HandleID, IoctlID, r);
     return r;
 }
 
