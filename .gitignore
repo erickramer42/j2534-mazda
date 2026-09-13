@@ -10,3 +10,7 @@ build/
 *.code-workspace
 test/build/
 test/.local/
+test/*.dll
+test/traces/
+test/*.log
+test/trace.ini

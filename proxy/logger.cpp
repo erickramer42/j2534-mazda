@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <string>
+#include <share.h>
 
 #include "logger.h"
 
@@ -33,7 +34,8 @@ static void OpenLogFileLocked()
     swprintf(wpath, MAX_PATH, L"%strace_%04d%02d%02d_%02d%02d%02d.log",
              g_traceDir.c_str(), st.wYear, st.wMonth, st.wDay,
              st.wHour, st.wMinute, st.wSecond);
-    _wfopen_s(&g_file, wpath, L"w");
+    // _wfopen_s(&g_file, wpath, L"w"); // doesn't allow sharing, so other processes can't read the log while we're writing
+    g_file = _wfsopen(wpath, L"w", _SH_DENYNO);
 }
 
 void LogCall(const char* fmt, ...)

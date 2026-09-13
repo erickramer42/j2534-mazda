@@ -1,0 +1,16 @@
+EXPORTS
+    PassThruClose
+    PassThruConnect
+    PassThruDisconnect
+    PassThruGetLastError
+    PassThruIoctl
+    PassThruOpen
+    PassThruReadMsgs
+    PassThruReadVersion
+    PassThruSetProgrammingVoltage
+    PassThruStartMsgFilter
+    PassThruStartPeriodicMsg
+    PassThruStopMsgFilter
+    PassThruStopPeriodicMsg
+    PassThruWriteMsgs
+    

@@ -1,18 +1,23 @@
-cmake_minimum_required(VERSION 3.20)
-project(j2534_proxy LANGUAGES CXX)
-
-add_library(j2534_proxy SHARED
+add_library(proxy_dll SHARED
     proxy.cpp
     logger.cpp
+    logger.h
+    j2534_types.h
+    exports.def
 )
 
-# name must sync with .def file and registry entry FunctionLibrary path
-set_target_properties(j2534_proxy PROPERTIES
+target_include_directories(proxy_dll PUBLIC ".")
+
+set_target_properties(proxy_dll PROPERTIES
     OUTPUT_NAME "OBDXTrace"
+    PREFIX ""
+    SUFFIX ".dll"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/proxy"
 )
 
-target_compile_features(j2534_proxy PRIVATE cxx_std_17)
-
-if(MSVC)
-    target_compile_options(j2534_proxy PRIVATE /W4)
-endif()
+# Copy to test/ as OBDXVX_J2534.dll for rig testing
+add_custom_command(TARGET proxy_dll POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:proxy_dll>"
+        "${CMAKE_SOURCE_DIR}/test/OBDXVX_J2534.dll"
+    COMMENT "Copying OBDXTrace.dll to test/ for rig")
