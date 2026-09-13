@@ -4,7 +4,6 @@
 #include "j2534_types.h"
 
 void LoggerInit(const std::wstring& iniPath);
-void OpenLogFile();
 void LogCall(const char* fmt, ...);
 void LogMsgs(const char* dir, unsigned long channelId,
              const PASSTHRU_MSG* msgs, unsigned long count);

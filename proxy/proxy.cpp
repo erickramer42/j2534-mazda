@@ -6,7 +6,6 @@
 #include "logger.h"
 
 #define STATUS_NOERROR 0x0000
-#define FIVE_BAUD_INIT 0x05
 
 static HMODULE g_real = NULL;
 static HMODULE g_selfModule = NULL;
@@ -81,6 +80,23 @@ PassThruOpen(const char* pName, unsigned long* pDeviceID)
     long r = f(pName, pDeviceID);
     LogCall("PassThruOpen(name='%s') -> %ld deviceId=%lu",
             pName ? pName : "", r, pDeviceID ? *pDeviceID : 0);
+
+    // warm cache eagerly, to prevent two threads from racing and corrupting the cache map
+    Resolve("PassThruClose");
+    Resolve("PassThruConnect");
+    Resolve("PassThruDisconnect");
+    Resolve("PassThruReadMsgs");
+    Resolve("PassThruWriteMsgs");
+    Resolve("PassThruStartPeriodicMsg");
+    Resolve("PassThruStopPeriodicMsg");
+    Resolve("PassThruStartMsgFilter");
+    Resolve("PassThruStopMsgFilter");
+    Resolve("PassThruSetProgrammingVoltage");
+    Resolve("PassThruReadVoltage");
+    Resolve("PassThruReadVersion");
+    Resolve("PassThruGetLastError");
+    Resolve("PassThruIoctl");
+    
     return r;
 }
 
@@ -261,6 +277,7 @@ PassThruIoctl(unsigned long HandleID, unsigned long IoctlID,
     if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     long r = f(HandleID, IoctlID, pInput, pOutput);
 
+    LogCall("Ioctl(handle=%lu id=0x%lX) -> %ld", HandleID, IoctlID, r);
     if (IoctlID == 0x02 && pInput) {            // SET_CONFIG: params inbound
         SCONFIG_LIST* list = (SCONFIG_LIST*)pInput;
         for (unsigned long i = 0; i < list->NumOfParams; ++i)
@@ -273,7 +290,6 @@ PassThruIoctl(unsigned long HandleID, unsigned long IoctlID,
             LogCall("  GET_CONFIG param=0x%lX value=0x%lX",
                     list->ConfigPtr[i].Parameter, list->ConfigPtr[i].Value);
     }
-    LogCall("Ioctl(handle=%lu id=0x%lX) -> %ld", HandleID, IoctlID, r);
     return r;
 }
 

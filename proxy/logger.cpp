@@ -5,7 +5,6 @@
 
 #include "logger.h"
 
-#define TRACE_DIR   "C:\\j2534_traces"
 #define DATA_CAP    4128   // full buffer: never truncate flash payloads
 
 static std::wstring g_traceDir; // directory of this proxy DLL
@@ -17,22 +16,12 @@ void LoggerInit(const std::wstring& iniPath)
 {
     if (!g_mutex) g_mutex = CreateMutexA(NULL, FALSE, NULL);
 
-    // 1) default trace dir is next to the DLL
     std::wstring selfDir(iniPath);
     size_t slash = selfDir.find_last_of(L'\\');
     if (slash != std::wstring::npos) selfDir.resize(slash);
 
-    // 2) trace.ini lives next to the DLLs; read [trace] dir= override
-    wchar_t dirBuf[MAX_PATH];
-    GetPrivateProfileStringW(L"trace", L"dir", L"", dirBuf, MAX_PATH,
-                             (selfDir + L"\\trace.ini").c_str());
-
-    if (dirBuf[0])
-        g_traceDir = dirBuf;
-    else
-        g_traceDir = selfDir + L"\\traces";   // sensible default subdir
-
-    CreateDirectoryW(g_traceDir.c_str(), NULL);  // ok if exists
+    g_traceDir = selfDir + L"\\traces";
+    CreateDirectoryW(g_traceDir.c_str(), NULL);   // ok if it already exists
     g_traceDir += L"\\";
 }
 
