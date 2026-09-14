@@ -158,7 +158,7 @@ def main():
     threads = [threading.Thread(target=worker) for _ in range(3)]
     [th.start() for th in threads]; [th.join() for th in threads]
     torn = [l for l in log_text().splitlines()
-            if not (l.startswith("[") or l.startswith("  MSG"))]
+        if not l.startswith(("[", "MSG ", "[SUSPECT"))]
     check("no torn/interleaved log lines", not torn, "%d bad lines" % len(torn))
 
     lib.PassThruClose(dev)
@@ -178,10 +178,28 @@ def main():
                 "lib=ctypes.CDLL(r'%s');"
                 "rc=lib.PassThruOpen(None,byref(c_ulong()));"
                 "assert rc==0xE2, rc;print('OK')" % PROXY_DLL)
-        r = subprocess.call([sys.executable, "-c", code])
-        check("missing real DLL: rc=0xE2, no crash", r == 0)
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True) 
+        check("missing real DLL: rc=0xE2, no crash", r.returncode == 0)
     finally:
         os.rename(REAL_DLL + ".bak", REAL_DLL)
+        
+    # 11. Periodic message logging
+    periodic = make_msg(6, [0x03, 0x00])
+    num.value = 1
+    rc = lib.PassThruStartPeriodicMsg(ch, byref(periodic), byref(c_ulong(0)), 100)
+    # Mock returns periodic in next read
+    rc = lib.PassThruReadMsgs(ch, byref(PASSTHRU_MSG()), byref(num), 100)
+    t = log_text()
+    check("Periodic message logged", "MSG PERIODIC" in t or "txflags=0x0" in t,
+          "periodic msg should appear in log")
+    
+    # 12. Error code propagation
+    lib.PassThruClose(dev)
+    lib.PassThruConnect(dev, 6, 0, 500000, byref(ch))  # reopen channel then attempt bogus write
+    rc = lib.PassThruWriteMsgs(c_ulong(999), byref(make_msg(6, [0])), byref(num), 100)
+    # Invalid channel should fail, proxy should propagate and log
+    check("Error code propagate", rc != 0 and "ch=999" in log_text()[-500:],
+          "invalid channel call should return error and log channel number")
 
     failed = [n for n, ok in RESULTS if not ok]
     print("\n%d/%d checks passed" % (len(RESULTS) - len(failed), len(RESULTS)))

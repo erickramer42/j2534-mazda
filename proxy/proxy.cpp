@@ -146,7 +146,7 @@ PassThruReadMsgs(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pNu
     if (g_enabled) LogCall("PassThruReadMsgs(ch=%lu timeout=%lu) -> %ld num=%lu",
                            ChannelID, Timeout, r, pNumMsgs ? *pNumMsgs : 0);
     if (g_enabled && pNumMsgs && *pNumMsgs > 0 && r == STATUS_NOERROR)
-        LogMsgs("RX", ChannelID, pMsg, *pNumMsgs);
+        LogMsgs("RX", ChannelID, pMsg, *pNumMsgs, pMsg->DataSize > 4128);
     return r;
 }
 
@@ -158,7 +158,7 @@ PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pN
     Fn f = (Fn)Resolve("PassThruWriteMsgs");
     if (!f) return 0xE2; // ERR_NOT_SUPPORTED
     if (pNumMsgs && *pNumMsgs > 0)
-        LogMsgs("TX", ChannelID, pMsg, *pNumMsgs);
+        LogMsgs("TX", ChannelID, pMsg, *pNumMsgs, pMsg->DataSize > 4128);
     long r = f(ChannelID, pMsg, pNumMsgs, Timeout);
     LogCall("PassThruWriteMsgs(ch=%lu timeout=%lu) -> %ld", ChannelID, Timeout, r);
     return r;

@@ -1,8 +1,7 @@
 # j2534-mazda
 
 A J2534 proxy DLL that intercepts communication between a J2534 application
-and its vehicle interface, logging all traffic to files for protocol
-reverse-engineering.
+and its vehicle interface, logging all traffic to files.
 
 ## Requirements
 
@@ -87,6 +86,13 @@ In the target application folder:
 
 Set `enabled=0` to disable logging without removing the proxy.
 
+4. Verify the deployed copy carries version metadata (blank values
+   mean the target app will reject it):
+
+   ```
+   (Get-Item OBDXVX_J2534.dll).VersionInfo | Format-List FileVersion
+   ```
+
 Expected folder layout after deployment:
 
 ```
@@ -114,3 +120,9 @@ proxy copy. The application is then completely stock again.
   material from your ECU.
 - Generated test artifacts (`*.dll`, `traces/`, `trace.ini`) are gitignored.
   The test rig is rebuilt by CMake and never committed.
+- The proxy carries a version resource (`proxy/resource.rc`) mirroring the 
+  original driver's metadata. The target application validates this and
+  rejects DLLs with blank or missing version info ("not supported"). 
+  If the target driver version changes, update FILEVERSION/PRODUCTVERSION
+  and the string values in `proxy/resource.rc` to match, or the same check
+  fails again.

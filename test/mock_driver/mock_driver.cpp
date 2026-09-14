@@ -4,13 +4,17 @@
 #include <map>
 #include <vector>
 #include <mutex>
+#include <set>
 
 static std::mutex g_lock;
 static std::vector<PASSTHRU_MSG> g_rxQueue;
 static std::map<unsigned long, unsigned long> g_config; // param -> value
 static unsigned long g_nextChannel = 0;
+static std::set<unsigned long> g_channels;
 static unsigned long g_nextFilter = 0;
 static unsigned long g_nextPeriodic = 0;
+static std::vector<PASSTHRU_MSG> g_periodicQueue;
+static unsigned long g_nextPeriodicID = 0x200;
 
 static void StrCopy80(char* dst, const char* src)
 {
@@ -38,16 +42,21 @@ PassThruConnect(unsigned long, unsigned long, unsigned long, unsigned long,
     if (!pChannelID) return 0xC1;
     std::lock_guard<std::mutex> lk(g_lock);
     *pChannelID = ++g_nextChannel;
+    g_channels.insert(*pChannelID);
     return 0;
 }
 
-__declspec(dllexport) long __stdcall PassThruDisconnect(unsigned long) { return 0; }
+__declspec(dllexport) long __stdcall PassThruDisconnect(unsigned long ChannelID) {
+    std::lock_guard<std::mutex> lk(g_lock);
+    g_channels.erase(ChannelID);
+    return 0;
+}
 
 __declspec(dllexport) long __stdcall
-PassThruWriteMsgs(unsigned long, PASSTHRU_MSG* pMsg, unsigned long* pNumMsgs,
+PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pNumMsgs,
                   unsigned long)
 {
-    if (!pMsg || !pNumMsgs || *pNumMsgs == 0) return 0xC1;
+    if (!pMsg || !pNumMsgs || *pNumMsgs == 0 || g_channels.find(ChannelID) == g_channels.end()) return 0xC1;
     PASSTHRU_MSG resp = {};
     resp.ProtocolID = pMsg[0].ProtocolID;
     resp.Timestamp  = 1000 + pMsg[0].DataSize;
@@ -64,11 +73,20 @@ PassThruWriteMsgs(unsigned long, PASSTHRU_MSG* pMsg, unsigned long* pNumMsgs,
 
 
 __declspec(dllexport) long __stdcall
-PassThruReadMsgs(unsigned long, PASSTHRU_MSG* pMsg, unsigned long* pNumMsgs,
+PassThruReadMsgs(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pNumMsgs,
                  unsigned long)
 {
-    if (!pMsg || !pNumMsgs) return 0xC1;
+    if (!pMsg || !pNumMsgs || g_channels.find(ChannelID) == g_channels.end()) return 0xC1;
     std::lock_guard<std::mutex> lk(g_lock);
+
+    // Yield periodic first, then queued responses
+    if (!g_periodicQueue.empty()) {
+        *pMsg = g_periodicQueue.front();
+        g_periodicQueue.erase(g_periodicQueue.begin());  // pop it after one read, can modify to keep it in the queue for repeated reads if desired
+        *pNumMsgs = 1;
+        return 0;
+    }
+
     if (g_rxQueue.empty()) { *pNumMsgs = 0; return 0xB0; }    // mock-defined timeout
     *pMsg = g_rxQueue.front();
     g_rxQueue.erase(g_rxQueue.begin());
@@ -96,30 +114,43 @@ PassThruGetLastError(char* pErrorDescription)
 }
 
 __declspec(dllexport) long __stdcall
-PassThruStartMsgFilter(unsigned long, unsigned long, PASSTHRU_MSG*,
+PassThruStartMsgFilter(unsigned long ChannelID, unsigned long, PASSTHRU_MSG*,
                        PASSTHRU_MSG*, PASSTHRU_MSG*, unsigned long* pFilterID)
 {
-    if (!pFilterID) return 0xC1;
+    if (!pFilterID || g_channels.find(ChannelID) == g_channels.end()) return 0xC1;
     std::lock_guard<std::mutex> lk(g_lock);
     *pFilterID = ++g_nextFilter;
     return 0;
 }
 
 __declspec(dllexport) long __stdcall
-PassThruStopMsgFilter(unsigned long, unsigned long) { return 0; }
-
-__declspec(dllexport) long __stdcall
-PassThruStartPeriodicMsg(unsigned long, PASSTHRU_MSG*, unsigned long* pMsgID,
-                         unsigned long)
+PassThruStopMsgFilter(unsigned long ChannelID, unsigned long FilterID)
 {
-    if (!pMsgID) return 0xC1;
-    std::lock_guard<std::mutex> lk(g_lock);
-    *pMsgID = 0x100 + ++g_nextPeriodic;
+    if (g_channels.find(ChannelID) == g_channels.end()) return 0xC1;
     return 0;
 }
 
 __declspec(dllexport) long __stdcall
-PassThruStopPeriodicMsg(unsigned long, unsigned long) { return 0; }
+PassThruStartPeriodicMsg(unsigned long ChannelID, PASSTHRU_MSG* pMsg, unsigned long* pMsgID,
+                         unsigned long)
+{
+    if (!pMsgID || !pMsg || g_channels.find(ChannelID) == g_channels.end()) return 0xC1;
+    std::lock_guard<std::mutex> lk(g_lock);
+    *pMsgID = ++g_nextPeriodicID;
+    g_periodicQueue.push_back(*pMsg);
+    return 0;
+}
+
+__declspec(dllexport) long __stdcall
+PassThruStopPeriodicMsg(unsigned long, unsigned long) 
+{ 
+    std::lock_guard<std::mutex> lk(g_lock);
+    for (auto it = g_periodicQueue.begin(); it != g_periodicQueue.end();) {
+        // Mark as stopped; just clear the queue for simplicity, can be modified to remove only the specific ID if desired
+        it = g_periodicQueue.erase(it);
+    }
+    return 0; 
+}
 
 __declspec(dllexport) long __stdcall
 PassThruSetProgrammingVoltage(unsigned long, unsigned long, unsigned long)
