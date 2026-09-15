@@ -201,6 +201,43 @@ def main():
     check("Error code propagate", rc != 0 and "ch=999" in log_text()[-500:],
           "invalid channel call should return error and log channel number")
 
+    # 13. HexBytes logging: concurrent StartMsgFilter calls
+    log_before = len(log_text())
+
+    def filter_worker(tid, results):
+        b = 0xA0 + tid
+        mask = make_msg(6, [b, b, b, b])
+        pat  = make_msg(6, [b, b, b, b])
+        fc   = make_msg(6, [b, b, b, b])
+        for _ in range(200):
+            rc = lib.PassThruStartMsgFilter(ch, 1, byref(mask), byref(pat),
+                                            byref(fc), byref(fid))
+            if rc != 0:
+                results[tid] = "rc=%d" % rc
+                return
+        results[tid] = "ok"
+
+    threads = []
+    results = {}
+    for t in range(4):
+        th = threading.Thread(target=filter_worker, args=(t, results))
+        threads.append(th); th.start()
+    for th in threads: th.join()
+
+    trip = re.compile(r"mask=\[([0-9A-F ]*)\] pattern=\[([0-9A-F ]*)\] fc=\[([0-9A-F ]*)\]")
+    new_lines = [l for l in log_text()[log_before:].splitlines()
+                if "StartMsgFilter" in l]
+    bad = []
+    for l in new_lines:
+        m = trip.search(l)
+        if not m or not (m.group(1) == m.group(2) == m.group(3)):
+            bad.append(l)
+
+    check("concurrent filters log correct data",
+        all(v == "ok" for v in results.values()) and
+        len(new_lines) >= 800 and not bad,
+        "concurrent StartMsgFilter calls must log matching mask/pattern/fc triples")
+
     failed = [n for n, ok in RESULTS if not ok]
     print("\n%d/%d checks passed" % (len(RESULTS) - len(failed), len(RESULTS)))
     sys.exit(1 if failed else 0)

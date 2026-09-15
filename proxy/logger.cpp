@@ -99,7 +99,9 @@ void LogMsgs(const char* dir, unsigned long channelId,
             size_t pos = 0;
             unsigned long n = m->DataSize < DATA_CAP ? m->DataSize : DATA_CAP;
             for (unsigned long b = 0; b < n; ++b) {
-                pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", m->Data[b]);
+                int w = snprintf(hex + pos, sizeof(hex) - pos, "%02X ", m->Data[b]);
+                if (w < 0 || (size_t)w >= sizeof(hex) - pos) break; // prevent overflow
+                pos += w;
             }
             fprintf(g_file, "MSG %s ch=%lu proto=0x%lX txflags=0x%lX rxstatus=0x%lX "
                             "ts=%lu len=%lu edi=%lu data=%.*s\n",
@@ -111,42 +113,20 @@ void LogMsgs(const char* dir, unsigned long channelId,
     ReleaseMutex(g_mutex);
 }
 
-void LogMsgs(const char* dir, unsigned long channelId,
-             const PASSTHRU_MSG* msgs, unsigned long count)
-{
-    if (!g_mutex) return;
-    WaitForSingleObject(g_mutex, INFINITE);
-    OpenLogFileLocked();
-    if (g_file) {
-        for (unsigned long i = 0; i < count; ++i) {
-            const PASSTHRU_MSG* m = &msgs[i];
-
-            char hex[DATA_CAP * 3 + 1]; // one big line, built then written once
-            size_t pos = 0;
-            unsigned long n = m->DataSize < DATA_CAP ? m->DataSize : DATA_CAP;
-            for (unsigned long b = 0; b < n; ++b)
-                pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", m->Data[b]);
-
-            fprintf(g_file, "  MSG %s ch=%lu proto=0x%lX txflags=0x%lX rxstatus=0x%lX "
-                            "ts=%lu len=%lu edi=%lu data=%.*s\n",
-                    dir, channelId, m->ProtocolID, m->TxFlags, m->RxStatus,
-                    m->Timestamp, m->DataSize, m->ExtraDataIndex, (int)pos, hex);
-        }
-        fflush(g_file);
-    }
-    ReleaseMutex(g_mutex);
-}
-
 const char* HexBytes(const PASSTHRU_MSG& msg)
 {
-    static char bufs[4][256];
-    static int slot = 0;
+    static thread_local char bufs[4][256];
+    static thread_local int slot = 0;
     char* buf = bufs[slot];
     slot = (slot + 1) % 4;
 
-    unsigned long n = msg.DataSize < 64 ? msg.DataSize : 64; // masks/patterns are short
+    unsigned long n = msg.DataSize < 64 ? msg.DataSize : 64;
     size_t pos = 0;
-    for (unsigned long i = 0; i < n; ++i)
-        pos += snprintf(buf + pos, sizeof(bufs[0]) - pos, "%02X ", msg.Data[i]);
+    for (unsigned long i = 0; i < n; ++i) {
+        int w = snprintf(buf + pos, sizeof(buf) - pos, "%02X ", msg.Data[i]);
+        if (w < 0 || (size_t)w >= sizeof(buf) - pos)
+            break;
+        pos += w;
+    }
     return buf;
 }
